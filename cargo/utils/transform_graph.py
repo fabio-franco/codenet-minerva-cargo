@@ -203,6 +203,15 @@ class TransformGraph:
                 )
             ]
             cls.nodes[key]["class_partition"] = mode(class_node["method_partitions"])
+
+            if cls.nodes[key]["class_partition"] == -1:
+                items = list(filter(lambda x: x != -1, class_node["method_partitions"]))
+
+                if len(items) == 0:
+                    cls.nodes[key]["class_partition"] = 10
+                else:
+                    cls.nodes[key]["class_partition"] = mode(items)
+
             cls.nodes[key]["centrality"] = mean(class_node["centrality"])
             cls.nodes[key]["uncertainity"] = (
                 0
