@@ -235,41 +235,59 @@ class Cargo:
     def assign_init_labels_via_package_name(self, G, init_labels, max_part, labels_file, partitions):
         # Here it is using package name to set the initial partition distribution
         packages_with_classes = {}
+        packages_by_level_depth = {}
+
         for node in G.nodes:
             package_name = ".".join(node.split(".")[:-2])
-            if package_name in packages_with_classes:
-                packages_with_classes[package_name] += 1
-            else:
-                packages_with_classes[package_name] = 1
+
+            if package_name not in packages_with_classes:
+                level_depth = len(package_name.split("."))
+                packages_with_classes[package_name] = level_depth
+
+                if level_depth not in packages_by_level_depth:
+                    packages_by_level_depth[level_depth] = 1
+                else:
+                    packages_by_level_depth[level_depth] += 1
 
         numberOfPackages = len(packages_with_classes)
         if numberOfPackages < max_part:
-            # when the number of packages are lesser than max_part, it is better to assign the partitions randomly
+            # when the number of packages are lesser than max_part, it is better to assign the labels randomly
             self.assign_init_labels_via_round_robin(self, G, init_labels, max_part, labels_file, partitions)
         else:
-            # packages = sorted(packages_with_classes.items(), key=lambda item: item[1]) # sort by frequency
-            packages = list(dict(sorted(packages_with_classes.items(), key=lambda item: item[1])).keys()) # sort by frequency and parse to list
+            initial_level_to_labels = -1
+            packages_by_level_depth = dict(sorted(packages_by_level_depth.items(), key=lambda item: item[0])) # sorted by key value
+            for level in packages_by_level_depth:
+                if packages_by_level_depth[level] >= max_part-1:
+                    initial_level_to_labels = level
+                    break
+            
+            if initial_level_to_labels == -1:
+                # when none of the package levels have at least the max_part number of packages, it is better to assign the labels randomly
+                self.assign_init_labels_via_round_robin(self, G, init_labels, max_part, labels_file, partitions)
+            else:
+                packages = {}
+                counter = 0
+                packages_with_classes = dict(sorted(packages_with_classes.items(), key=lambda item: item[1])) # sorted by value
+                for pack in packages_with_classes:
+                    if packages_with_classes[pack] < initial_level_to_labels:
+                        packages[pack] = max_part-1 # default label for the upper level packages in the package hierarchy
+                    elif packages_with_classes[pack] == initial_level_to_labels:
+                        # assign partition label using round robin algorithm
+                        packages[pack] = counter % (max_part-1) 
+                        counter += 1
+                        if counter >= (max_part-1): 
+                            counter = 0
+                    else:
+                        # this case need to find what is the package in the hierarchy that has this package prefix
+                        prefix = ".".join(pack.split(".")[:-1])
+                        if prefix in packages:
+                            packages[pack] = packages[prefix]
+                        else:
+                            packages[pack] = max_part-1 # default label for any package that does not fit in the package hierarchy
 
-            # # set default label value for every package
-            # for item in packages_with_classes:
-            #     packages_with_classes[item] = -1
-
-            # numberOfPartitions = numberOfPackages
-            # while numberOfPartitions >= max_part:
-
-
-            # use round robin with packages
-            counter = 0
-            for item in packages_with_classes:
-                packages_with_classes[item] = counter % max_part
-                counter += 1
-                if counter >= max_part: 
-                    counter = 0
-
-            for node in G.nodes:
-                package_name = ".".join(node.split(".")[:-2])
-                G.nodes[node]["partition"] = packages_with_classes[package_name]
-
+                for node in G.nodes:
+                    package_name = ".".join(node.split(".")[:-2])
+                    G.nodes[node]["partition"] = packages[package_name]
 
     def assign_init_labels_via_round_robin(self, G, init_labels, max_part, labels_file, partitions):
         # Here it is using round robin to set the initial partition distribution
@@ -612,12 +630,14 @@ class Cargo:
         method_graph_view = self.json_graph
         
         # define a default partition number, this way we avoid "gaps" in the partitions name by getting the next value available
-        defaultPartitionLabelNumber = 10 #num_gen_partitions if num_gen_partitions < max_part else max_part # TODO: consider to use max_part-1
+        defaultPartitionLabelNumber = -1 #num_gen_partitions if num_gen_partitions < max_part else max_part # TODO: consider to use max_part-1
         
         for method_node in method_graph_view["nodes"]:
             if method_node["id"] in assignments: # TODO: for daytrader7 there is 208 assignments, however, the sdg contains 308 nodes
                 method_node["partition"] = assignments[method_node["id"]]
             else:
+                print('method not in label propagation: ', method_node["id"])
+
                 method_node["partition"] = defaultPartitionLabelNumber # changed from fixed max_part to avoid "gaps" in the partitions name
             try:
                 method_node["centrality"] = labelprop_G.nodes[method_node["id"]][
